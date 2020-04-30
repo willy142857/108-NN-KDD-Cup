@@ -1,7 +1,9 @@
+import argparse
+import math
+from collections import defaultdict
+
 import pandas as pd
 from tqdm import tqdm
-from collections import defaultdict
-import math
 
 
 def get_sim_item(df, user_col, item_col, use_iif=False):
@@ -10,14 +12,14 @@ def get_sim_item(df, user_col, item_col, use_iif=False):
         item_id: {relate_item_id: count / log(1 + items_count)}
     }
     """
-    user_item_ = df.groupby(user_col)[item_col].agg(set).reset_index()
-    user_item_dict = dict(zip(user_item_[user_col], user_item_[item_col]))
-
+    user_item_df = df.groupby(user_col)[item_col].agg(set).reset_index()
+    user_item_dict = dict(zip(user_item_df[user_col], user_item_df[item_col]))
+    
+    item_cnt = df[item_col].value_counts().to_dict()
+    
     sim_item = {}
-    item_cnt = defaultdict(int)
     for user, items in tqdm(user_item_dict.items(), desc='calc sim'):
         for i in items:
-            item_cnt[i] += 1
             sim_item.setdefault(i, {})
             for relate_item in items:
                 if i == relate_item:
@@ -26,12 +28,12 @@ def get_sim_item(df, user_col, item_col, use_iif=False):
                 if not use_iif:
                     sim_item[i][relate_item] += 1
                 else:
-                    sim_item[i][relate_item] += 1 / math.log(1 + len(items))
+                    sim_item[i][relate_item] += 1 / math.log(len(items)+1)
     sim_item_corr = sim_item.copy()
 
     for i, related_items in tqdm(sim_item.items(), desc='sim item corr'):
         for j, cij in related_items.items():
-            sim_item_corr[i][j] = cij/math.sqrt(item_cnt[i]*item_cnt[j])
+            sim_item_corr[i][j] = cij/math.log(item_cnt[i]*item_cnt[j])
 
     return sim_item_corr, user_item_dict
 
@@ -44,6 +46,7 @@ def recommend(sim_item_corr, user_item_dict, user_id, top_k, item_num):
             if j not in interacted_items:
                 rank.setdefault(j, 0)
                 rank[j] += wij
+
     return sorted(rank.items(), key=lambda d: d[1], reverse=True)[:item_num]
 
 
@@ -67,14 +70,12 @@ def get_predict(df, pred_col, top_fill):
     return df
 
 
-if __name__ == "__main__":
-    now_phase = 2
+def generate_answer(phase, test_path, submission_name, top_k):
     train_path = 'underexpose_train'
-    test_path = 'underexpose_test'
     recom_item = []
 
     whole_click = pd.DataFrame()
-    for c in range(now_phase + 1):
+    for c in range(phase + 1):
         print('phase:', c)
         click_train = pd.read_csv(train_path + '/underexpose_train_click-{}.csv'.format(c),
                                   header=None, names=['user_id', 'item_id', 'time'])
@@ -84,11 +85,11 @@ if __name__ == "__main__":
         all_click = click_train.append(click_test)
         whole_click = whole_click.append(all_click)
         
-        item_sim_list, user_item = get_sim_item(
+        item_sim_list, user_item = get_sim_item( 
             all_click, 'user_id', 'item_id', use_iif=True)
     
         for i in tqdm(click_test['user_id'].unique(), desc='recommend'):
-            rank_item = recommend(item_sim_list, user_item, i, 500, 50)
+            rank_item = recommend(item_sim_list, user_item, i, top_k, 50)
             for j in rank_item:
                 recom_item.append([i, j[0], j[1]])
 
@@ -98,4 +99,18 @@ if __name__ == "__main__":
 
     recom_df = pd.DataFrame(recom_item, columns=['user_id', 'item_id', 'sim'])
     result = get_predict(recom_df, 'sim', top50_click)
-    result.to_csv('baseline.csv', index=False, header=None)
+    result.to_csv(submission_name, index=False, header=None)
+
+# usage: baseline.py <now_phase> <test_path> <submission_name>
+# example: python baseline.py 4 underexpose_test submission.csv
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument('phase', type=int)
+    parser.add_argument('test_path', type=str)
+    parser.add_argument('submission_name', type=str)
+    args = parser.parse_args()
+
+    # test_path = 'underexpose_test'
+    # fake_test_path = 'fake_test'
+    top_k = 3500
+    generate_answer(args.phase, args.test_path, args.submission_name, top_k)
