@@ -8,52 +8,52 @@ from tqdm import tqdm
 from evaluation import evaluate
 
 
-def get_sim_item(df, user_col, item_col, use_iif=False):
-    """
-    sim_item = {
-        item_id: {relate_item_id: count / log(1 + items_count)}
-    }
-    """
-    user_item_df = df.groupby(user_col)[item_col].agg(list).reset_index()
-    user_item_dict = dict(zip(user_item_df[user_col], user_item_df[item_col]))
+def get_sim_item(df, user_col, item_col, use_iif=False):  
+    user_item_ = df.groupby(user_col)[item_col].agg(list).reset_index()  
+    user_item_dict = dict(zip(user_item_[user_col], user_item_[item_col]))  
     
+    item_user_ = df.groupby(item_col)[user_col].agg(set).reset_index()  
+    item_user_dict = dict(zip(item_user_[item_col], item_user_[user_col]))    
+
     user_time_ = df.groupby(user_col)['time'].agg(list).reset_index()
     user_time_dict = dict(zip(user_time_[user_col], user_time_['time']))
 
-    item_cnt = df[item_col].value_counts().to_dict()
-    
     sim_item = {}
-    for user, items in tqdm(user_item_dict.items(), desc='calc sim'):
-        for loc1, item in enumerate(items):
-            item_cnt[item] += 1
-            sim_item.setdefault(item, {})
-            for loc2, relate_item in enumerate(items):
+
+    for item, users in tqdm(item_user_dict.items(), desc='calc sim'):
+        sim_item.setdefault(item, {}) 
+    
+        for u in users:
+            tmp_len = len(user_item_dict[u])
+            loc1 = user_item_dict[u].index(item)
+            for loc2, relate_item in enumerate(user_item_dict[u]):
                 if item == relate_item:
                     continue
-                sim_item[item].setdefault(relate_item, 0)
 
+                sim_item[item].setdefault(relate_item, 0)
                 if use_iif:
-                    sim_item[item][relate_item] += 1 / math.log(1 + len(items))
+                    sim_item[item][relate_item] += 1 / (math.log(len(users)+1) * math.log(tmp_len+1))
                 else:
-                    t1 = user_time_dict[user][loc1]
-                    t2 = user_time_dict[user][loc2]
+                    t1 = user_time_dict[u][loc1]
+                    t2 = user_time_dict[u][loc2]
                     t12_diff = abs(t1 - t2)
                     loc12_diff = abs(loc1 - loc2)
-                    time_weight = (0.8**(loc12_diff-1)) * (1 - t12_diff*10000)
+                    time_weight = (0.8**(loc12_diff-1)) * (-math.log(t12_diff + 1e-6))
                     if loc2 > loc1:
                         # 正向
                         weight = 1.0 * time_weight
-                        sim_item[item][relate_item] += weight * (1 / math.log(1 + len(items)))
+                        sim_item[item][relate_item] += weight / (math.log(len(users)) + 1)
                     else:
                         # 逆向
                         weight = 0.7 * time_weight
-                        sim_item[item][relate_item] += weight * (1 / math.log(1 + len(items)))
-                
+                        sim_item[item][relate_item] += weight / (math.log(len(users)) + 1)
+                        
+    item_cnt = df[item_col].value_counts().to_dict()
     for i, related_items in tqdm(sim_item.items(), desc='normalize'):
         for j, cij in related_items.items():
-            sim_item[i][j] = cij / math.log(item_cnt[i]*item_cnt[j])
+            sim_item[i][j] = cij / math.log(item_cnt[j]+1)
 
-    return sim_item, user_item_dict
+    return sim_item, user_item_dict 
 
 
 def recommend(sim_item_corr, user_item_dict, user_id, top_k, item_num):
@@ -61,7 +61,7 @@ def recommend(sim_item_corr, user_item_dict, user_id, top_k, item_num):
     interacted_items = user_item_dict[user_id]
     interacted_items = interacted_items[::-1]
     for loc, i in enumerate(interacted_items):
-        for j, wij in sorted(sim_item_corr[i].items(), reverse=True)[0:top_k]:
+        for j, wij in sorted(sim_item_corr[i].items(), key=lambda d: d[1], reverse=True)[0:top_k]:
             if j not in interacted_items:
                 rank.setdefault(j, 0)
                 rank[j] += wij * (0.7**loc)
@@ -138,7 +138,7 @@ if __name__ == "__main__":
 
     # test_path = 'underexpose_test'
     # fake_test_path = 'fake_test'
-    top_k = 3500
+    top_k = 500
     generate_answer(args.phase, args.test_path, args.submission_name, top_k)
     
     print(f"top k: {top_k}")
