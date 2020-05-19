@@ -2,6 +2,7 @@
 from __future__ import division
 from __future__ import print_function
 
+import argparse
 import datetime
 import json
 import sys
@@ -108,8 +109,8 @@ def evaluate(phase, submit_fname, answer_fname='debias_track_answer.csv', curren
                     raise Exception(
                         'each row need have 50 DISTINCT items')
                 predictions[user_id] = item_ids
-    except Exception as _:
-        raise Exception('submission not in correct format')
+    except Exception as e:
+        raise Exception(e)
 
     scores = np.zeros(4, dtype=np.float32)
 
@@ -174,3 +175,11 @@ def _create_answer_file_for_evaluation(phase, answer_fname='debias_track_answer.
                     assert user_id % 11 == phase_id
                     print(phase_id, user_id, item_id, item_deg[item_id],
                           sep=',', file=fout)
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('phase', type=int)
+    parser.add_argument('submission_name', type=str)
+    args = parser.parse_args()
+    evaluate(args.phase, args.submission_name)

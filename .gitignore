@@ -128,8 +128,12 @@ dmypy.json
 # Pyre type checker
 .pyre/
 
-#Visual Studio Code
+# Visual Studio Code
 .vscode
 
-#Pycharm
+# Pycharm
 .idea
+
+# Data
+underexpose_train
+underexpose_test
