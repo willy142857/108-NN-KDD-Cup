@@ -1,7 +1,6 @@
 import argparse
 import math
 from collections import defaultdict
-
 import pandas as pd
 from tqdm import tqdm
 
@@ -38,14 +37,14 @@ def get_sim_item(df, user_col, item_col, use_iif=False):
                     t2 = user_time_dict[u][loc2]
                     t12_diff = abs(t1 - t2)
                     loc12_diff = abs(loc1 - loc2)
-                    time_weight = (0.8**(loc12_diff-1)) * (-math.log(t12_diff + 1e-6))
+                    time_weight = ((loc12_diff)**-0.5) * -math.log(t12_diff + 1e-6)
                     if loc2 > loc1:
                         # 正向
-                        weight = 1.0 * time_weight
+                        weight = 1.05 * time_weight
                         sim_item[item][relate_item] += weight / (math.log(len(users)) + 1)
                     else:
                         # 逆向
-                        weight = 0.7 * time_weight
+                        weight = 1.0 * time_weight
                         sim_item[item][relate_item] += weight / (math.log(len(users)) + 1)
                         
     item_cnt = df[item_col].value_counts().to_dict()
@@ -64,7 +63,7 @@ def recommend(sim_item_corr, user_item_dict, user_id, top_k, item_num):
         for j, wij in sorted(sim_item_corr[i].items(), key=lambda d: d[1], reverse=True)[0:top_k]:
             if j not in interacted_items:
                 rank.setdefault(j, 0)
-                rank[j] += wij * (0.7**loc)
+                rank[j] += wij * ((loc+1)**-0.7)
 
     return sorted(rank.items(), key=lambda d: d[1], reverse=True)[:item_num]
 
@@ -128,7 +127,7 @@ def generate_answer(phase, test_path, submission_name, top_k):
 
 
 # usage: baseline.py <now_phase> <test_path> <submission_name>
-# example: python baseline.py 4 underexpose_test submission.csv
+# example: python baseline.py 6 underexpose_test submission.csv
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('phase', type=int)
