@@ -1,13 +1,19 @@
 import argparse
 import math
+import pickle
 from collections import defaultdict
+import numpy as np
 import pandas as pd
 from tqdm import tqdm
-
 from evaluation import evaluate
 
 
-def get_sim_item(df, user_col, item_col, use_iif=False):  
+item_feat_dict = pickle.load(open('underexpose_train/item_feat.pkl', 'rb'))
+item_feat_set = set(item_feat_dict.keys())
+item_img_feat_dict = pickle.load(open('underexpose_train/item_img_feat.pkl', 'rb'))
+
+
+def get_sim_item(df, user_col, item_col, phase, use_iif=False):  
     user_item_ = df.groupby(user_col)[item_col].agg(list).reset_index()  
     user_item_dict = dict(zip(user_item_[user_col], user_item_[item_col]))  
     
@@ -21,36 +27,44 @@ def get_sim_item(df, user_col, item_col, use_iif=False):
 
     for item, users in tqdm(item_user_dict.items(), desc='calc sim'):
         sim_item.setdefault(item, {}) 
-    
+
         for u in users:
-            tmp_len = len(user_item_dict[u])
             loc1 = user_item_dict[u].index(item)
             for loc2, relate_item in enumerate(user_item_dict[u]):
                 if item == relate_item:
                     continue
-
                 sim_item[item].setdefault(relate_item, 0)
-                if use_iif:
-                    sim_item[item][relate_item] += 1 / (math.log(len(users)+1) * math.log(tmp_len+1))
+                
+                t1 = user_time_dict[u][loc1]
+                t2 = user_time_dict[u][loc2]
+                t12_diff = abs(t1 - t2)
+                loc12_diff = abs(loc1 - loc2)
+                time_weight = ((loc12_diff)**-0.5) * -math.log(t12_diff + 1e-6)
+
+                if item in item_feat_set and relate_item in item_feat_set:
+                    sim_item[item][relate_item] += 0.007*np.inner(item_feat_dict[item], item_feat_dict[relate_item]) 
+                    sim_item[item][relate_item] += 0.01*np.inner(item_img_feat_dict[item], item_img_feat_dict[relate_item])
+                    
+                # sim(i, j) = P(j | i) = (Ui & Uj) / Ui
+                # ref: https://bit.ly/3dyDuch
+                ui = set(users)
+                uj = set(item_user_dict[relate_item])
+                confidence = len(ui.intersection(uj)) / len(ui)
+
+                if loc2 > loc1:
+                    # 正向
+                    weight = 1.05 * time_weight
+                    sim_item[item][relate_item] += confidence + weight
                 else:
-                    t1 = user_time_dict[u][loc1]
-                    t2 = user_time_dict[u][loc2]
-                    t12_diff = abs(t1 - t2)
-                    loc12_diff = abs(loc1 - loc2)
-                    time_weight = ((loc12_diff)**-0.5) * -math.log(t12_diff + 1e-6)
-                    if loc2 > loc1:
-                        # 正向
-                        weight = 1.05 * time_weight
-                        sim_item[item][relate_item] += weight / (math.log(len(users)) + 1)
-                    else:
-                        # 逆向
-                        weight = 1.0 * time_weight
-                        sim_item[item][relate_item] += weight / (math.log(len(users)) + 1)
-                        
+                    # 逆向
+                    weight = 1.0 * time_weight
+                    sim_item[item][relate_item] += confidence + weight
+                
+
     item_cnt = df[item_col].value_counts().to_dict()
     for i, related_items in tqdm(sim_item.items(), desc='normalize'):
         for j, cij in related_items.items():
-            sim_item[i][j] = cij / math.log(item_cnt[j]+1)
+            sim_item[i][j] = cij / (math.log(item_cnt[j]) * math.log(item_cnt[i]) + 1)
 
     return sim_item, user_item_dict 
 
@@ -93,7 +107,8 @@ def generate_answer(phase, test_path, submission_name, top_k):
     recom_item = []
 
     whole_click = pd.DataFrame()
-    for c in range(phase + 1):
+    phase_begin = 7 if phase > 6 else 0
+    for c in range(phase_begin, phase + 1):
         print('phase:', c)
         click_train = pd.read_csv(train_path + '/underexpose_train_click-{}.csv'.format(c),
                                   header=None, names=['user_id', 'item_id', 'time'])
@@ -105,17 +120,19 @@ def generate_answer(phase, test_path, submission_name, top_k):
 
         all_click = all_click.drop_duplicates(subset=['user_id','item_id','time'], keep='last')
         all_click = all_click.sort_values(by='time')
-
+        
         item_sim_list, user_item = get_sim_item( 
-            all_click, 'user_id', 'item_id', use_iif=False)
+                all_click, 'user_id', 'item_id', c, use_iif=False)
 
         test_qtime_df = pd.read_csv(test_path + '/underexpose_test_qtime-{}.csv'.format(c),
                                  header=None, names=['user_id', 'item_id', 'time'])
         for i in tqdm(test_qtime_df['user_id'].unique(), desc='recommend'):
             rank_item = recommend(item_sim_list, user_item, i, top_k, 50)
+            if len(rank_item) == 0:
+                recom_item.append([i, -100, -9999])
             for j in rank_item:
                 recom_item.append([i, j[0], j[1]])
-
+    
     # find most popular items
     whole_click = whole_click.drop_duplicates(keep='last')
     top50_click = whole_click['item_id'].value_counts().index[:50].values

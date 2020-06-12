@@ -60,24 +60,17 @@ def evaluate(phase, submit_fname, answer_fname='debias_track_answer.csv', curren
         1588348799,  # 2020-05-01 23:59:59 (T=4)
         1588953599,  # 2020-05-08 23:59:59 (T=5)
         1589558399,  # 2020-05-15 23:59:59 (T=6)
-        1590163199,  # 2020-05-22 23:59:59 (T=7)
-        1590767999,  # 2020-05-29 23:59:59 (T=8)
-        1591372799  # .2020-06-05 23:59:59 (T=9)
+        1591315200,  # 2020-06-05 08:00:00 (Beijing Time) (T=7)
+        1591315200,  # 2020-06-05 08:00:00 (Beijing Time) (T=8)
+        1591315200  # .2020-06-05 08:00:00 (Beijing Time) (T=9)
     ]
     assert len(schedule_in_unix_time) == 10
-    for i in range(1, len(schedule_in_unix_time) - 1):
-        # 604800 == one week
-        assert schedule_in_unix_time[i] + 604800 == schedule_in_unix_time[i + 1]
-
+    
     if current_time is None:
         current_time = int(time.time())
     print('current_time:', current_time)
     print('date_time:', datetime.datetime.fromtimestamp(current_time))
-    current_phase = 0
-    while (current_phase < 9) and (
-            current_time > schedule_in_unix_time[current_phase + 1]):
-        current_phase += 1
-    print('current_phase:', current_phase)
+    current_phase = phase
 
     try:
         answers = [{} for _ in range(10)]
@@ -128,7 +121,14 @@ def evaluate(phase, submit_fname, answer_fname='debias_track_answer.csv', curren
                         user_id, phase_id))
         try:
             # We sum the scores from all the phases, instead of averaging them.
-            scores += evaluate_each_phase(predictions, answers[phase_id])
+            score = evaluate_each_phase(predictions, answers[phase_id])
+            scores += score
+            print(f"phase{phase_id} ", '-' * 50)
+            print(f"score:           {float(score[0])}",
+                  f"hitrate_50_full: {float(score[2])}",
+                  f"ndcg_50_full:    {float(score[0])}",
+                  f"hitrate_50_half: {float(score[3])}",
+                  f"ndcg_50_half:    {float(score[1])}", sep='\n')
         except Exception as _:
             raise Exception('error occurred during evaluation')
         
