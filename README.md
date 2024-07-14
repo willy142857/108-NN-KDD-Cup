@@ -4,6 +4,8 @@
 
 ### <https://tianchi.aliyun.com/competition/entrance/231785/introduction>
 
+Achieved **25th rank** (total of 1895 teams) in the competition.
+
 ## Requirements
 
 * python >= 3.7
